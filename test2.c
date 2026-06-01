@@ -54,10 +54,10 @@ void assure_node_capacite() {
 
     node_capacite = (node_capacite == 0) ? 100000 : node_capacite * 2;
 
-    node_id  = realloc(node_id,  node_capacite * sizeof(long long));
+    node_id = realloc(node_id, node_capacite * sizeof(long long));
     node_lat = realloc(node_lat, node_capacite * sizeof(double));
     node_lon = realloc(node_lon, node_capacite * sizeof(double));
-    graphe    = realloc(graphe,    node_capacite * sizeof(Way*));
+    graphe = realloc(graphe, node_capacite * sizeof(Way*));
 
     if (!node_id || !node_lat || !node_lon || !graphe) {
         printf("Allocation memoire echouee\n");
