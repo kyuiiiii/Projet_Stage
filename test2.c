@@ -7,6 +7,9 @@
 #define RAYON_TERRE 6371000.0
 #define HASH_SIZE 200003  
 
+
+
+
 //fait le lien entre l'id d'une node et un id interne, plus facile à manipuler
 typedef struct HashNode {
     long long osm_id; //id du fichier osm
@@ -19,9 +22,9 @@ HashNode *tableHash[HASH_SIZE]; //table de hachage pour trouver nos indices de n
 //represente les aretes, ou ways, de notre graphe
 typedef struct Way {
     int to; //sommet de destination
-    double distance;
+    float distance;
     int vitesse;
-    double temps; //temps théorique pour parcourir l'arête
+    float temps; //temps théorique pour parcourir l'arête
     struct Way *suiv;
 } Way;
 
@@ -174,7 +177,7 @@ int node_callback(const void *user_data, const readosm_node *node) {
 }
 
 //convertit une valeur mph vers kmh
-int parse_maxvitesse(const char *value) {
+int parse_maxspeed(const char *value) {
     if (!value) {return 0;}
 
     char *endptr;
@@ -210,8 +213,8 @@ int way_callback(const void *user_data, const readosm_way *way) {
             highway = v;
         }
 
-        if (strcmp(k, "maxvitesse") == 0){
-            vitesse = parse_maxvitesse(v);
+        if (strcmp(k, "maxspeed") == 0){
+            vitesse = parse_maxspeed(v);
         }
 
         if (strcmp(k, "oneway") == 0) {
@@ -252,6 +255,236 @@ int way_callback(const void *user_data, const readosm_way *way) {
     return READOSM_OK;
 }
 
+typedef struct {
+    int node;
+    double dist;
+} HeapNode;
+
+typedef struct {
+    HeapNode *data;
+    int taille;
+    int capacite;
+} MinHeap;
+
+MinHeap *heap_create(int capacite) {
+    MinHeap *h = malloc(sizeof(MinHeap));
+
+    h->data = malloc(capacite * sizeof(HeapNode));
+    h->taille = 0;
+    h->capacite = capacite;
+
+    return h;
+}
+
+void heap_swap(HeapNode *a, HeapNode *b) {
+    HeapNode temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+void heap_push(MinHeap *h, int node, double dist) {
+    if (h->taille >= h->capacite) {
+        h->capacite *= 2;
+        h->data = realloc(
+            h->data,
+            h->capacite * sizeof(HeapNode)
+        );
+    }
+
+    int i = h->taille++;
+
+    h->data[i].node = node;
+    h->data[i].dist = dist;
+
+    while (i > 0) {
+        int parent = (i - 1) / 2;
+
+        if (h->data[parent].dist <= h->data[i].dist)
+            break;
+
+        heap_swap(&h->data[parent], &h->data[i]);
+
+        i = parent;
+    }
+}
+
+HeapNode heap_pop(MinHeap *h) {
+    HeapNode min = h->data[0];
+
+    h->data[0] = h->data[--h->taille];
+
+    int i = 0;
+
+    while (1) {
+        int left = 2 * i + 1;
+        int right = 2 * i + 2;
+        int smallest = i;
+
+        if (left < h->taille &&
+            h->data[left].dist < h->data[smallest].dist)
+            smallest = left;
+
+        if (right < h->taille &&
+            h->data[right].dist < h->data[smallest].dist)
+            smallest = right;
+
+        if (smallest == i)
+            break;
+
+        heap_swap(&h->data[i], &h->data[smallest]);
+
+        i = smallest;
+    }
+
+    return min;
+}
+
+int heap_empty(MinHeap *h) {
+    return h->taille == 0;
+}
+
+void heap_free(MinHeap *h) {
+    free(h->data);
+    free(h);
+}
+
+void dijkstra(int source, int destination) {
+
+    double *dist = malloc(node_count * sizeof(double));
+    int *pred = malloc(node_count * sizeof(int));
+
+    for (int i = 0; i < node_count; i++) {
+        dist[i] = INFINITY;
+        pred[i] = -1;
+    }
+
+    dist[source] = 0.0;
+
+    MinHeap *heap = heap_create(1024);
+
+    heap_push(heap, source, 0.0);
+
+    while (!heap_empty(heap)) {
+
+        HeapNode current = heap_pop(heap);
+
+        int u = current.node;
+
+        if (current.dist > dist[u])
+            continue;
+
+        if (u == destination)
+            break;
+
+        for (Way *e = graphe[u]; e; e = e->suiv) {
+
+            int v = e->to;
+
+            double alt = dist[u] + e->temps;
+            //double alt = dist[u] + e->distance; //chemin plus court en metres plutot que temps
+
+            if (alt < dist[v]) {
+
+                dist[v] = alt;
+                pred[v] = u;
+
+                heap_push(heap, v, alt);
+            }
+        }
+    }
+
+    if (dist[destination] == INFINITY) {
+        printf("Aucun chemin trouve\n");
+    }
+    else {
+
+        int *path = malloc(node_count * sizeof(int));
+        int n = 0;
+
+        for (int v = destination;
+            v != -1;
+            v = pred[v])
+        {
+            path[n++] = v;
+        }
+
+        double total_distance = 0.0;
+
+        for (int i = n - 1; i > 0; i--) {
+
+            int from = path[i];
+            int to   = path[i - 1];
+
+            for (Way *e = graphe[from]; e; e = e->suiv) {
+
+                if (e->to == to) {
+                    total_distance += e->distance;
+                    break;
+                }
+            }
+        }
+
+        printf("\n===== RESULTAT =====\n");
+        printf("Temps minimal : %.1f s (%.1f min)\n",
+            dist[destination],
+            dist[destination] / 60.0);
+
+        printf("Distance totale : %.2f km\n",
+            total_distance / 1000.0);
+
+        printf("Nombre de noeuds : %d\n", n);
+
+        printf("\n===== SEGMENTS =====\n");
+
+        for (int i = n - 1; i > 0; i--) {
+
+            int from = path[i];
+            int to   = path[i - 1];
+
+            for (Way *e = graphe[from]; e; e = e->suiv) {
+
+                if (e->to == to) {
+
+                    printf(
+                        "%lld -> %lld | %.0f m | %d km/h | %.1f s\n",
+                        node_id[from],
+                        node_id[to],
+                        e->distance,
+                        e->vitesse,
+                        e->temps
+                    );
+
+                    break;
+                }
+            }
+        }
+        printf("\n");
+
+        free(path);
+    }
+
+    heap_free(heap);
+    free(dist);
+    free(pred);
+}
+
+int findNode(long long osm_id) {
+
+    unsigned long h = hashFunction(osm_id);
+
+    HashNode *cur = tableHash[h];
+
+    while (cur) {
+
+        if (cur->osm_id == osm_id)
+            return cur->index;
+
+        cur = cur->suiv;
+    }
+
+    return -1;
+}
+
 //main, ouvre le fichier osm, construit le graphe, affiche les ways et libere la mémoire
 int main() {
     const char *filename = "map3.osm";
@@ -273,7 +506,17 @@ int main() {
 
     readosm_close(handle);
 
-    for (int i = 0; i < node_count; i++) {
+    long long depart_osm = 13789018119;
+    long long arrivee_osm = 11558432440;
+
+    int depart = findNode(depart_osm);
+    int arrivee = findNode(arrivee_osm);
+
+    if (depart != -1 && arrivee != -1) {
+        dijkstra(depart, arrivee);
+    }
+
+    /*for (int i = 0; i < node_count; i++) {
         for (Way *e = graphe[i]; e; e = e->suiv) {
             printf("%lld -> %lld | %.1f m | %d km/h | %.1f s\n",
                    node_id[i],
@@ -282,7 +525,7 @@ int main() {
                    e->vitesse,
                    e->temps);
         }
-    }
+    }*/
 
     for (int i = 0; i < node_count; i++) {
         Way *e = graphe[i];
