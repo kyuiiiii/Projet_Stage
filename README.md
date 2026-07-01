@@ -16,6 +16,7 @@ Plusieurs fichiers .osm sont déjà disponibles pour pouvoir tester, si vous vou
 dans la 1ère ligne du main
 
 Afin de compiler lancer la commande suivante : 
+
 gcc maingps.c -o ray.exe -lreadosm -lraylib -lopengl32 -lgdi32 -lwinmm
 
 puis lancer le fichier ray.exe
